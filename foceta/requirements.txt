@@ -1,0 +1,7 @@
+docker_py==1.10.6
+gym==0.23.1
+matplotlib==3.4.3
+numpy==1.22.3
+pandas==1.1.5
+termcolor==1.1.0
+tqdm==4.64.0
