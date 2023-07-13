@@ -1,0 +1,15 @@
+{
+    "epsilon" : 0.4,
+    "epsilon_threshold" : 0.1,
+    "epsilon_decay" : 0.9999,
+    "number_of_training_episodes" : 2000,
+    "number_of_evaluate_episodes" : 100,
+    "forbidden_state_reward" : -100,
+    "alpha" : 0.1,
+    "gamma" : 0.9,
+    "step_penalty" : 0.5,
+    "threshold" : 0.95,
+    "shield_training" : true,
+    "shield_evaluation" : true,
+    "evaluate_every" : 200
+}
