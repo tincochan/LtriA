@@ -1,0 +1,6 @@
+spacy>=3.5.0
+spacy-transformers>=1.2.5
+spacy-huggingface-hub>=0.0.9
+pathy[gcs]
+typer
+wasabi
