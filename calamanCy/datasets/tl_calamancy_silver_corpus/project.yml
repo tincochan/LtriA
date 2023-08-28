@@ -1,0 +1,323 @@
+title: "Creating a silver-standard dataset from the TLUnified Tagalog corpus"
+description: |
+  This project creates, `tl_calamancy_silver_corpus` a silver-standard dataset for
+  named-entity recognition (NER). It uses another silver-annotated
+  [WikiANN](https://huggingface.co/datasets/wikiann) (`wikiann`) dataset to train an
+  initial NER model, and then bootstrapped the annotations of a larger
+  [TLUnified](https://arxiv.org/abs/2111.06053) corpus (`tlunified`).
+
+  ### Evaluation
+
+  After bootstrapping the annotations of TLUnified with a model trained from
+  WikiANN,I split the dataset into train, dev, and test for different sizes
+  (10k, 30k, 50k). I did it this way because unfortunately, the bulk of the
+  TLUnified dataset cannot fit my machine's memory constraints.
+
+  Lastly, I trained a TLUnified model from these silver-standard annotations and
+  evaluated it on its own test set. I did this for five trials, reporting the mean 
+  and standard deviation. You can see the results below:
+
+  | Dataset Size              | ENTS_P      | ENTS_R      | ENTS_F      | SPEED (WPS)       |
+  |---------------------------|-------------|-------------|-------------|-------------------|
+  | tl_tlunified_silver-10000 | 0.59 (0.03) | 0.55 (0.03) | 0.57 (0.03) | 33809.12 (397.81) |
+  | tl_tlunified_silver-30000 | 0.67 (0.02) | 0.66 (0.01) | 0.66 (0.02) | 50477.00 (724.74) |
+  | tl_tlunified_silver-50000 | 0.70 (0.01) | 0.69 (0.03) | 0.70 (0.02) | 56460.42 (590.85) |
+
+  And here are the per-entity results:
+
+  | Dataset Size              | Entity | Precision   | Recall      | F-score     |
+  |---------------------------|--------|-------------|-------------|-------------|
+  | tl_tlunified_silver-10000 | LOC    | 0.57 (0.03) | 0.51 (0.04) | 0.54 (0.03) |
+  |                           | ORG    | 0.68 (0.07) | 0.66 (0.04) | 0.67 (0.05) |
+  |                           | PER    | 0.56 (0.05) | 0.50 (0.04) | 0.53 (0.03) |
+  | tl_tlunified_silver-30000 | LOC    | 0.64 (0.02) | 0.62 (0.02) | 0.63 (0.02) |
+  |                           | ORG    | 0.63 (0.04) | 0.62 (0.03) | 0.63 (0.03) |
+  |                           | PER    | 0.76 (0.04) | 0.76 (0.04) | 0.76 (0.02) |
+  | tl_tlunified_silver-50000 | LOC    | 0.65 (0.03) | 0.64 (0.04) | 0.65 (0.03) |
+  |                           | ORG    | 0.68 (0.02) | 0.66 (0.03) | 0.67 (0.02) |
+  |                           | PER    | 0.79 (0.02) | 0.80 (0.04) | 0.79 (0.02) |
+
+  In addition, I also created a small gold-standard test set to evaluate the
+  models against. The annotations were done by me, a native speaker, using
+  [Prodigy](https://prodi.gy). Here are the results:
+
+
+
+
+
+
+  ### Future goal
+
+  My eventual goal for this project is to produce a gold-standard NER dataset
+  from TLUnified. This should help train more robust and performance Tagalog models
+  for structured prediction.
+
+vars:
+  seed: 42
+  version: 0.0.0
+  config: "default.cfg"
+  gpu_id: 0
+  lang: "tl"
+  tlunified_limit: -1
+  wikiann_silver: "wikiann_silver"
+  tlunified_silver: "tlunified_silver"
+  tlunified_gold: "tlunified_gold"
+  prodigy_dataset: "tlunified_gold"
+
+directories:
+  - "assets"
+  - "configs"
+  - "corpus/raw"
+  - "corpus/silver"
+  - "corpus/gold"
+  - "scripts"
+  - "training"
+  - "metrics"
+  - "packages"
+
+workflows:
+  all:
+    - "download-wikiann"
+    - "process-tlunified"
+    - "train-wikiann"
+    - "annotate-silver"
+    - "train-tlunified"
+    - "cross-evaluate-wikiann"
+    - "cross-evaluate-tlunified"
+    # - "cross-evaluate-gold"
+    - "package"
+  wikiann:
+    - "download-wikiann"
+    - "train-wikiann"
+    - "evaluate-wikiann"
+
+assets:
+  - dest: "assets/tlunified.zip"
+    url: "https://s3.us-east-2.amazonaws.com/blaisecruz.com/datasets/tlunified/tlunified.zip"
+    description: "TLUnified dataset (from Improving Large-scale Language Models and Resources for Filipino by Cruz and Cheng 2022)"
+
+commands:
+  - name: "download-wikiann"
+    help: "Download the WikiANN dataset from HuggingFace and save to spaCy format"
+    script:
+      - >-
+        python -m scripts.download_wikiann
+        --filename ${vars.wikiann_silver}
+        --output-dir corpus/silver/
+        --gpu-id ${vars.gpu_id}
+        --verbose
+    outputs:
+      - "corpus/silver/${vars.wikiann_silver}-train.spacy"
+      - "corpus/silver/${vars.wikiann_silver}-validation.spacy"
+      - "corpus/silver/${vars.wikiann_silver}-test.spacy"
+
+  - name: "process-tlunified"
+    help: "Convert the TLUnified dataset to the spaCy format"
+    script:
+      - unzip -o assets/tlunified.zip -d assets/
+      - >-
+        python -m scripts.process_tlunified assets/tlunified/train.txt
+        --filename ${vars.tlunified_silver}
+        --output-dir corpus/raw/
+        --gpu-id ${vars.gpu_id}
+        --limit ${vars.tlunified_limit}
+        --segment
+        --shuffle
+        --seed ${vars.seed}
+        --verbose
+    deps:
+      - "assets/tlunified.zip"
+    outputs:
+      - "corpus/raw/${vars.tlunified_silver}-train.spacy"
+      - "corpus/raw/${vars.tlunified_silver}-validation.spacy"
+      - "corpus/raw/${vars.tlunified_silver}-test.spacy"
+
+  - name: "train-wikiann"
+    help: "Train a Tagalog NER model from the WikiANN dataset"
+    script:
+      - >-
+        python -m spacy train
+        configs/${vars.config}
+        --nlp.lang ${vars.lang}
+        --output training/${vars.lang}_${vars.wikiann_silver}/
+        --paths.train corpus/silver/${vars.wikiann_silver}-train.spacy
+        --paths.dev corpus/silver/${vars.wikiann_silver}-validation.spacy
+        --system.seed ${vars.seed}
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - corpus/silver/${vars.wikiann_silver}-train.spacy
+      - corpus/silver/${vars.wikiann_silver}-validation.spacy
+    outputs:
+      - training/${vars.lang}_${vars.wikiann_silver}/
+
+  - name: "annotate-silver"
+    help: "Annotate a larger TLUnified dataset using the trained model from WikiANN"
+    script:
+      - >-
+        python -m scripts.annotate 
+        corpus/raw/${vars.tlunified_silver}-train.spacy
+        corpus/raw/${vars.tlunified_silver}-validation.spacy
+        corpus/raw/${vars.tlunified_silver}-test.spacy
+        --model-path training/${vars.lang}_${vars.wikiann_silver}/model-best/
+        --output-dir corpus/silver/
+        --gpu-id ${vars.gpu_id}
+        --verbose
+    deps:
+      - "corpus/raw/${vars.tlunified_silver}-train.spacy"
+      - "corpus/raw/${vars.tlunified_silver}-validation.spacy"
+      - "corpus/raw/${vars.tlunified_silver}-test.spacy"
+    outputs:
+      - "corpus/silver/${vars.tlunified_silver}-train.spacy"
+      - "corpus/silver/${vars.tlunified_silver}-validation.spacy"
+      - "corpus/silver/${vars.tlunified_silver}-test.spacy"
+
+  - name: "train-tlunified"
+    help: "Train a Tagalog NER model from the tlunified dataset"
+    script:
+      - >-
+        python -m spacy train
+        configs/${vars.config}
+        --nlp.lang ${vars.lang}
+        --output training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/
+        --paths.train corpus/silver/${vars.tlunified_silver}-train.spacy
+        --paths.dev corpus/silver/${vars.tlunified_silver}-validation.spacy
+        --system.seed ${vars.seed}
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - corpus/silver/${vars.tlunified_silver}-train.spacy
+      - corpus/silver/${vars.tlunified_silver}-validation.spacy
+    outputs:
+      - training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/
+
+  - name: "evaluate-wikiann"
+    help: "Evaluate WikiANN to its test set"
+    script:
+      - mkdir -p metrics/mono/${vars.wikiann_silver}/
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.wikiann_silver}/model-best/
+        corpus/silver/${vars.wikiann_silver}-test.spacy
+        --output metrics/mono/${vars.wikiann_silver}/${vars.lang}_${vars.wikiann_silver}.json
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - training/${vars.lang}_${vars.wikiann_silver}
+      - corpus/silver/${vars.wikiann_silver}-test.spacy
+    outputs:
+      - metrics/mono/${vars.wikiann_silver}/${vars.lang}_${vars.wikiann_silver}.json
+
+  - name: "evaluate-tlunified"
+    help: "Evaluate TLUnified to its test set"
+    script:
+      - mkdir -p metrics/mono/${vars.tlunified_silver}/
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/model-best/ 
+        corpus/silver/${vars.tlunified_silver}-test.spacy
+        --output metrics/mono/${vars.tlunified_silver}/${vars.lang}_${vars.wikiann_silver}-${vars.tlunified_limit}-${vars.seed}.json
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/
+      - corpus/silver/${vars.tlunified_silver}-test.spacy
+    outputs:
+      - metrics/mono/${vars.tlunified_silver}/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}.json
+
+  - name: "cross-evaluate-wikiann"
+    help: "Evaluate the trained models to the silver-annotated WikiANN test set"
+    script:
+      - mkdir -p metrics/cross/${vars.wikiann_silver}/
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.wikiann_silver}/model-best/
+        corpus/silver/${vars.wikiann_silver}-test.spacy
+        --output metrics/cross/${vars.wikiann_silver}/${vars.lang}_${vars.wikiann_silver}.json
+        --gpu-id ${vars.gpu_id}
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/model-best/
+        corpus/silver/${vars.wikiann_silver}-test.spacy
+        --output metrics/cross/${vars.wikiann_silver}/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}.json
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - training/${vars.lang}_${vars.wikiann_silver}
+      - training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/
+      - corpus/silver/${vars.wikiann_silver}-test.spacy
+    outputs:
+      - metrics/cross/${vars.wikiann_silver}/${vars.lang}_${vars.wikiann_silver}.json
+      - metrics/cross/${vars.wikiann_silver}/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}.json
+
+  - name: "cross-evaluate-tlunified"
+    help: "Evaluate the trained models to the silver-annotated tlunified test set"
+    script:
+      - mkdir -p metrics/cross/${vars.tlunified_silver}/
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.wikiann_silver}/model-best/
+        corpus/silver/${vars.tlunified_silver}-test.spacy
+        --output metrics/cross/${vars.tlunified_silver}/${vars.lang}_${vars.wikiann_silver}.json
+        --gpu-id ${vars.gpu_id}
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/model-best/
+        corpus/silver/${vars.tlunified_silver}-test.spacy
+        --output metrics/cross/${vars.tlunified_silver}/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}.json
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - training/${vars.lang}_${vars.wikiann_silver}
+      - training/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}/
+      - corpus/silver/${vars.tlunified_silver}-test.spacy
+    outputs:
+      - metrics/cross/${vars.tlunified_silver}/${vars.lang}_${vars.wikiann_silver}.json
+      - metrics/cross/${vars.tlunified_silver}/${vars.lang}_${vars.tlunified_silver}-${vars.tlunified_limit}-${vars.seed}.json
+
+  - name: "cross-evaluate-gold"
+    help: "Evaluate the trained models on an annotated subset of tlunified"
+    script:
+      - mkdir -p metrics/${vars.tlunified_gold}/
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.wikiann_silver}/model-best/
+        corpus/gold/${vars.tlunified_gold}-test.spacy
+        --output metrics/${vars.tlunified_gold}/${vars.lang}_${vars.wikiann_silver}.json
+        --gpu-id ${vars.gpu_id}
+      - >-
+        python -m spacy evaluate 
+        training/${vars.lang}_${vars.tlunified_silver}/model-best/
+        corpus/gold/${vars.tlunified_gold}-test.spacy
+        --output metrics/${vars.tlunified_gold}/${vars.lang}_${vars.tlunified_silver}.json
+        --gpu-id ${vars.gpu_id}
+    deps:
+      - training/${vars.lang}_${vars.wikiann_silver}
+      - training/${vars.lang}_${vars.tlunified_silver}
+      - corpus/gold/${vars.tlunified_gold}-test.spacy
+    outputs:
+      - metrics/${vars.tlunified_gold}/${vars.lang}_${vars.wikiann_silver}.json
+      - metrics/${vars.tlunified_gold}/${vars.lang}_${vars.tlunified_silver}.json
+
+  - name: "package"
+    help: "Package the trained models from the silver-annotated datasets"
+    script:
+      - >-
+        python -m spacy package training/${vars.lang}_${vars.wikiann_silver}/model-best/ packages/
+        --name ${vars.wikiann_silver}
+        --version ${vars.version}
+        --force
+      - >-
+        python -m spacy package training/${vars.lang}_${vars.tlunified_silver}/model-best/ packages/
+        --name ${vars.tlunified_silver}
+        --version ${vars.version}
+        --force
+    outputs_no_cache:
+      - packages/${vars.lang}_${vars.wikiann_silver}-${vars.version}/dist/${vars.lang}_${vars.wikiann_silver}-${vars.version}.tar.gz
+      - packages/${vars.lang}_${vars.tlunified_silver}-${vars.version}/dist/${vars.lang}_${vars.tlunified_silver}-${vars.version}.tar.gz
+
+  - name: "annotate"
+    help: "Annotate the TLUnified dataset using Prodigy's ner.correct"
+    script:
+      - >-
+        python -m prodigy ner.correct
+        ${vars.prodigy_dataset} 
+        training/${vars.lang}_${vars.tlunified_silver}/model-best/
+        assets/tlunified/train.txt
+    deps:
+      - assets/tlunified/train.txt
+      - training/${vars.lang}_${vars.tlunified_silver}/
